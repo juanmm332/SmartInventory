@@ -7,7 +7,7 @@ export interface Product {
 
 // API endpoint del backend .NET 9 Web API.
 // Cambia el puerto si tu backend usa uno distinto.
-export const PRODUCTS_ENDPOINT = "https://localhost:7082/api/products"
+export const PRODUCTS_ENDPOINT = "http://localhost:5290/api/products"
 
 // Stock por debajo de este valor dispara la alerta visual.
 export const LOW_STOCK_THRESHOLD = 20

@@ -21,5 +21,42 @@ namespace SmartInventory.Services
         {
             return _products;
         }
+
+        public Product? GetProductById(int id)
+        {
+            return _products.FirstOrDefault(p => p.Id == id);
+        }
+
+        public Product AddProduct(string name, decimal price, int stock)
+        {
+            var nextId = _products.Any() ? _products.Max(p => p.Id) + 1 : 1;
+            var product = new Product { Id = nextId, Name = name, Price = price, Stock = stock };
+            _products.Add(product);
+            return product;
+        }
+
+        public bool UpdateProduct(int id, decimal price, int stock)
+        {
+            var existing = GetProductById(id);
+            if (existing is null)
+            {
+                return false;
+            }
+
+            existing.Price = price;
+            existing.Stock = stock;
+            return true;
+        }
+
+        public bool DeleteProduct(int id)
+        {
+            var existing = GetProductById(id);
+            if (existing is null)
+            {
+                return false;
+            }
+
+            return _products.Remove(existing);
+        }
     }
 }
