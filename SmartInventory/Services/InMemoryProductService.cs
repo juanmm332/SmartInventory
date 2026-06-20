@@ -5,58 +5,59 @@ namespace SmartInventory.Services
     public class InMemoryProductService
     {
         private readonly List<Product> _products;
+        private int _nextId = 4; // Como metemos 3 productos mockeados, el próximo ID inicial será el 4
 
         public InMemoryProductService()
         {
-            // Datos mockeados
             _products = new List<Product>
             {
-                new Product { Id = 1, Name = "Notebook", Price = 1200.50m, Stock = 10 },
-                new Product { Id = 2, Name = "Mouse Inalámbrico", Price = 25.99m, Stock = 50 },
-                new Product { Id = 3, Name = "Teclado Mecánico", Price = 85.00m, Stock = 20 }
+                new Product { Id = 1, Name = "Notebook", Price = 1250.00m, Stock = 15 },
+                new Product { Id = 2, Name = "Mouse Inalámbrico", Price = 35.50m, Stock = 40 },
+                new Product { Id = 3, Name = "Teclado Mecánico", Price = 95.00m, Stock = 25 }
             };
         }
 
+        // GET ALL
         public IEnumerable<Product> GetAllProducts()
         {
             return _products;
         }
 
+        // GET BY ID
         public Product? GetProductById(int id)
         {
             return _products.FirstOrDefault(p => p.Id == id);
         }
 
-        public Product AddProduct(string name, decimal price, int stock)
+        // POST (Crear)
+        public Product AddProduct(Product product)
         {
-            var nextId = _products.Any() ? _products.Max(p => p.Id) + 1 : 1;
-            var product = new Product { Id = nextId, Name = name, Price = price, Stock = stock };
+            product.Id = _nextId++;
             _products.Add(product);
             return product;
         }
 
-        public bool UpdateProduct(int id, decimal price, int stock)
+        // PUT (Actualizar)
+        public bool UpdateProduct(int id, Product updatedProduct)
         {
-            var existing = GetProductById(id);
-            if (existing is null)
-            {
-                return false;
-            }
+            var existingProduct = GetProductById(id);
+            if (existingProduct == null) return false;
 
-            existing.Price = price;
-            existing.Stock = stock;
+            existingProduct.Name = updatedProduct.Name;
+            existingProduct.Price = updatedProduct.Price;
+            existingProduct.Stock = updatedProduct.Stock;
+
             return true;
         }
 
+        // DELETE (Eliminar)
         public bool DeleteProduct(int id)
         {
-            var existing = GetProductById(id);
-            if (existing is null)
-            {
-                return false;
-            }
+            var product = GetProductById(id);
+            if (product == null) return false;
 
-            return _products.Remove(existing);
+            _products.Remove(product);
+            return true;
         }
     }
 }

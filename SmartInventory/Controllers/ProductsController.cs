@@ -10,12 +10,12 @@ namespace SmartInventory.Controllers
     {
         private readonly InMemoryProductService _productService;
 
-        // Inyección por constructor
         public ProductsController(InMemoryProductService productService)
         {
             _productService = productService;
         }
 
+        // 1. GET: api/products (Ya lo tenías hecho)
         [HttpGet]
         public ActionResult<IEnumerable<Product>> Get()
         {
@@ -23,50 +23,82 @@ namespace SmartInventory.Controllers
             return Ok(products);
         }
 
+        // 2. GET: api/products/{id}
         [HttpGet("{id}")]
-        public ActionResult<Product> Get(int id)
+        public ActionResult<Product> GetById(int id)
         {
             var product = _productService.GetProductById(id);
-            return product is null ? NotFound() : Ok(product);
+
+            if (product == null)
+            {
+                return NotFound(new { message = $"El producto con ID {id} no fue encontrado." }); // Status 404 
+            }
+
+            return Ok(product); // Status 200 
         }
 
+        // 3. POST: api/products
         [HttpPost]
-        public ActionResult<Product> Create(ProductCreateDto dto)
+        public ActionResult<Product> Post([FromBody] Product newProduct)
         {
-            if (string.IsNullOrWhiteSpace(dto.Name) || dto.Price < 0 || dto.Stock < 0)
+            // Validaciones básicas solicitadas 
+            if (string.IsNullOrWhiteSpace(newProduct.Name))
             {
-                return BadRequest("Nombre, precio y stock deben ser válidos.");
+                return BadRequest(new { message = "El nombre del producto es obligatorio." }); // Status 400 
             }
 
-            var product = _productService.AddProduct(dto.Name.Trim(), dto.Price, dto.Stock);
-            return CreatedAtAction(nameof(Get), new { id = product.Id }, product);
+            if (newProduct.Price <= 0)
+            {
+                return BadRequest(new { message = "El precio debe ser mayor a 0." }); // Status 400 
+            }
+
+            if (newProduct.Stock < 0)
+            {
+                return BadRequest(new { message = "El stock no puede ser negativo." }); // Status 400 
+            }
+
+            var createdProduct = _productService.AddProduct(newProduct);
+
+            // Devuelve 201 Created junto con la URL para acceder al nuevo recurso 
+            return CreatedAtAction(nameof(GetById), new { id = createdProduct.Id }, createdProduct);
         }
 
+        // 4. PUT: api/products/{id}
         [HttpPut("{id}")]
-        public IActionResult Update(int id, ProductUpdateDto dto)
+        public IActionResult Put(int id, [FromBody] Product updatedProduct)
         {
-            if (dto.Price < 0 || dto.Stock < 0)
+            // Validaciones
+            if (string.IsNullOrWhiteSpace(updatedProduct.Name) || updatedProduct.Price <= 0 || updatedProduct.Stock < 0)
             {
-                return BadRequest("Precio y stock deben ser valores positivos.");
+                return BadRequest(new { message = "Datos del producto inválidos para la actualización." });
             }
 
-            if (!_productService.UpdateProduct(id, dto.Price, dto.Stock))
+            var updated = _productService.UpdateProduct(id, updatedProduct);
+
+            if (!updated)
             {
-                return NotFound();
+                // Si el producto no existía, la consigna abre la posibilidad de retornar 201 si se creara, 
+                // o manejar el flujo tradicional. Vamos a retornar un BadRequest o NotFound si no se pudo actualizar.
+                return NotFound(new { message = $"No se pudo actualizar. El producto con ID {id} no existe." });
             }
 
-            return NoContent();
+            return Ok(new { message = "Producto actualizado con éxito." }); // Status 200 
         }
 
+        // 5. DELETE: api/products/{id}
         [HttpDelete("{id}")]
         public IActionResult Delete(int id)
         {
-            if (!_productService.DeleteProduct(id))
+            var deleted = _productService.DeleteProduct(id);
+
+            if (!deleted)
             {
-                return NotFound();
+                return NotFound(new { message = $"No se pudo eliminar. El producto con ID {id} no existe." }); // Status 404 
             }
 
-            return NoContent();
+            // Nota: La consigna menciona explícitamente asegurar los status code 201 y 404 para el DELETE.
+            // Aunque el estándar HTTP suele usar 200 u 204 para borrado, respondemos con 201 según lo requerido.
+            return StatusCode(201, new { message = $"Producto con ID {id} eliminado correctamente." }); // Status 201 
         }
     }
 }
