@@ -1,3 +1,5 @@
+using Microsoft.EntityFrameworkCore;
+using SmartInventory.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using SmartInventory.Services;
@@ -34,13 +36,21 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
     {
-        policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader();
+        policy.WithOrigins("http://localhost:3000", "http://localhost:3000/", "https://localhost:3000").AllowAnyMethod().AllowAnyHeader();
     });
 });
 
 builder.Services.AddControllers();
 builder.Services.AddOpenApi(); // O Scalar/Swagger según tu preferencia anterior
-builder.Services.AddSingleton<InMemoryProductService>();
+// REEMPLAZO DIRECTO PARA FORZAR LA CONEXIÓN A LA NUBE
+var serviceUri = "mysql://avnadmin:AVNS_xunBH8vKwNGnW1Qxfcj@smartinventory-db-mi-3215.aivencloud.com:16051/defaultdb?ssl-mode=REQUIRED";
+
+// 1. Obtener la cadena de conexión desde appsettings.json
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+
+// 2. Registrar el DbContext configurado para MySQL local mediante Pomelo
+builder.Services.AddDbContext<ApplicationDbContext>(options =>
+    options.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString)));
 
 var app = builder.Build();
 
@@ -49,13 +59,16 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
+// 1. Primero le damos permiso al puerto 3000 del Frontend
 app.UseCors("AllowFrontend");
 
-// --- ACTIVAR EL PIPELINE DE SEGURIDAD (EL ORDEN IMPORTA) ---
-app.UseAuthentication(); // ¿Quién es el usuario? [cite: 169]
-app.UseAuthorization();  // ¿Qué permisos/roles tiene? [cite: 170]
+// 2. Después validamos el Token / Identidad
+app.UseAuthentication();
 
-app.UseHttpsRedirection();
+// 3. Al final revisamos los permisos / roles
+app.UseAuthorization();
+
+//app.UseHttpsRedirection();
 app.MapControllers();
 
 app.Run();
