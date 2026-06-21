@@ -1,7 +1,8 @@
-﻿using Microsoft.AspNetCore.Authorization; // <-- IMPORTANTE
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using SmartInventory.Data;
 using SmartInventory.Models;
-using SmartInventory.Services;
 
 namespace SmartInventory.Controllers
 {
@@ -9,80 +10,98 @@ namespace SmartInventory.Controllers
     [Route("api/[controller]")]
     public class ProductsController : ControllerBase
     {
-        private readonly InMemoryProductService _productService;
+        private readonly ApplicationDbContext _context;
 
-        public ProductsController(InMemoryProductService productService)
+        // Inyectamos el DbContext de la base de datos real
+        public ProductsController(ApplicationDbContext context)
         {
-            _productService = productService;
+            _context = context;
         }
 
-        // 1. GET ALL: Tanto admin como seller pueden consultar
+        // 1. GET ALL: Consultar todos los productos en MySQL
         [HttpGet]
-        [Authorize(Roles = "admin,seller")] // Permite ambos roles
-        public ActionResult<IEnumerable<Product>> Get()
+        [Authorize(Roles = "admin,seller")]
+        public async Task<ActionResult<IEnumerable<Product>>> Get()
         {
-            var products = _productService.GetAllProducts();
+            var products = await _context.Products.ToListAsync();
             return Ok(products);
         }
 
-        // 2. GET BY ID: Tanto admin como seller pueden consultar
+        // 2. GET BY ID: Buscar un producto por su clave primaria
         [HttpGet("{id}")]
-        [Authorize(Roles = "admin,seller")] // Permite ambos roles
-        public ActionResult<Product> GetById(int id)
+        [Authorize(Roles = "admin,seller")]
+        public async Task<ActionResult<Product>> GetById(int id)
         {
-            var product = _productService.GetProductById(id);
+            var product = await _context.Products.FindAsync(id);
+
             if (product == null)
             {
                 return NotFound(new { message = $"El producto con ID {id} no fue encontrado." });
             }
+
             return Ok(product);
         }
 
-        // 3. POST: SOLO admin puede crear
+        // 3. POST: Insertar un nuevo producto en MySQL
         [HttpPost]
-        [Authorize(Roles = "admin")] // Exclusivo
-        public ActionResult<Product> Post([FromBody] Product newProduct)
+        [Authorize(Roles = "admin")]
+        public async Task<ActionResult<Product>> Post([FromBody] Product newProduct)
         {
             if (string.IsNullOrWhiteSpace(newProduct.Name) || newProduct.Price <= 0 || newProduct.Stock < 0)
             {
                 return BadRequest(new { message = "Datos del producto inválidos." });
             }
 
-            var createdProduct = _productService.AddProduct(newProduct);
-            return CreatedAtAction(nameof(GetById), new { id = createdProduct.Id }, createdProduct);
+            // Agregamos el objeto al set de datos
+            _context.Products.Add(newProduct);
+            // Guardamos los cambios de forma asíncrona en la base de datos
+            await _context.SaveChangesAsync();
+
+            return CreatedAtAction(nameof(GetById), new { id = newProduct.Id }, newProduct);
         }
 
-        // 4. PUT: SOLO admin puede modificar
+        // 4. PUT: Modificar un producto existente
         [HttpPut("{id}")]
-        [Authorize(Roles = "admin")] // Exclusivo
-        public IActionResult Put(int id, [FromBody] Product updatedProduct)
+        [Authorize(Roles = "admin")]
+        public async Task<IActionResult> Put(int id, [FromBody] Product updatedProduct)
         {
             if (string.IsNullOrWhiteSpace(updatedProduct.Name) || updatedProduct.Price <= 0 || updatedProduct.Stock < 0)
             {
                 return BadRequest(new { message = "Datos inválidos." });
             }
 
-            var updated = _productService.UpdateProduct(id, updatedProduct);
-            if (!updated)
+            var existingProduct = await _context.Products.FindAsync(id);
+            if (existingProduct == null)
             {
                 return NotFound(new { message = $"El producto con ID {id} no existe." });
             }
 
-            return Ok(new { message = "Producto actualizado con éxito." });
+            // Actualizamos las propiedades
+            existingProduct.Name = updatedProduct.Name;
+            existingProduct.Price = updatedProduct.Price;
+            existingProduct.Stock = updatedProduct.Stock;
+
+            await _context.SaveChangesAsync();
+            return Ok(new { message = "Producto actualizado con éxito en MySQL." });
         }
 
-        // 5. DELETE: SOLO admin puede eliminar
+        // 5. DELETE: Eliminar físicamente un registro por ID
         [HttpDelete("{id}")]
-        [Authorize(Roles = "admin")] // Exclusivo
+        [Authorize(Roles = "admin")]
         public IActionResult Delete(int id)
         {
-            var deleted = _productService.DeleteProduct(id);
-            if (!deleted)
+            // Nota: Para mantener sincronía sincrónica con tu firma anterior,
+            // podemos buscarlo de forma directa usando Find
+            var product = _context.Products.Find(id);
+            if (product == null)
             {
                 return NotFound(new { message = $"El producto con ID {id} no existe." });
             }
 
-            return StatusCode(201, new { message = $"Producto con ID {id} eliminado correctamente." });
+            _context.Products.Remove(product);
+            _context.SaveChanges();
+
+            return StatusCode(201, new { message = $"Producto con ID {id} eliminado correctamente de MySQL." });
         }
     }
 }
