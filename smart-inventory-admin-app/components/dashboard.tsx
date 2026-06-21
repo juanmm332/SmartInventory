@@ -2,162 +2,171 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { KpiCard } from "@/components/kpi-card"
 import { ProductsTable } from "@/components/products-table"
+import { ProductFormDialog } from "@/components/product-form-dialog"
 import {
   type Product,
+  type ProductInput,
   MOCK_PRODUCTS,
-  PRODUCTS_ENDPOINT,
   LOW_STOCK_THRESHOLD,
   formatCurrency,
+  fetchProducts,
+  createProduct,
+  updateProduct,
+  deleteProduct,
 } from "@/lib/products"
-import { Boxes, DollarSign, AlertTriangle, RefreshCw, Wifi, WifiOff } from "lucide-react"
+import { getToken, clearToken, getUserRole, type UserRole } from "@/lib/auth"
+import { Boxes, DollarSign, AlertTriangle, RefreshCw, Wifi, WifiOff, LogOut, Plus } from "lucide-react"
 
 type Source = "api" | "mock" | "loading"
+type FormMode = "create" | "edit"
 
-export function Dashboard() {
+export function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [products, setProducts] = useState<Product[]>(MOCK_PRODUCTS)
   const [source, setSource] = useState<Source>("loading")
   const [isRefreshing, setIsRefreshing] = useState(false)
-  const [isSaving, setIsSaving] = useState(false)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
-  const [editingId, setEditingId] = useState<number | null>(null)
-  const [editPrice, setEditPrice] = useState<string>("")
-  const [editStock, setEditStock] = useState<string>("")
-  const [newName, setNewName] = useState("")
-  const [newPrice, setNewPrice] = useState("0")
-  const [newStock, setNewStock] = useState("0")
-  const [message, setMessage] = useState<string | null>(null)
+  const [role, setRole] = useState<UserRole | null>(null)
+  const [formOpen, setFormOpen] = useState(false)
+  const [formMode, setFormMode] = useState<FormMode>("create")
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
+
+  const isAdmin = role === "admin"
+
+  const handleUnauthorized = useCallback(() => {
+    clearToken()
+    onLogout()
+  }, [onLogout])
 
   const loadProducts = useCallback(async () => {
+    const token = getToken()
+    if (!token) {
+      handleUnauthorized()
+      return
+    }
+
+    setRole(getUserRole())
     setIsRefreshing(true)
-    setMessage(null)
+    setActionError(null)
 
     try {
-      const res = await fetch(PRODUCTS_ENDPOINT, {
-        headers: { Accept: "application/json" },
-        cache: "no-store",
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = (await res.json()) as Product[]
-      if (!Array.isArray(data)) throw new Error("Respuesta inesperada")
+      const data = await fetchProducts(token)
       setProducts(data)
       setSource("api")
-      console.log("[v0] Productos cargados desde la API:", data.length)
     } catch (error) {
-      console.log("[v0] Fallback a datos mockeados. Motivo:", (error as Error).message)
+      if ((error as Error).message === "UNAUTHORIZED") {
+        handleUnauthorized()
+        return
+      }
       setProducts(MOCK_PRODUCTS)
       setSource("mock")
-      setMessage("No se pudo conectar al backend. Usando datos mockeados.")
     } finally {
       setLastUpdated(new Date())
       setIsRefreshing(false)
     }
-  }, [])
+  }, [handleUnauthorized])
+
+  const handleLogout = useCallback(() => {
+    clearToken()
+    onLogout()
+  }, [onLogout])
 
   useEffect(() => {
     loadProducts()
   }, [loadProducts])
 
-  const startEdit = useCallback((product: Product) => {
-    setEditingId(product.id)
-    setEditPrice(product.price.toString())
-    setEditStock(product.stock.toString())
-    setMessage(null)
+  const openCreateForm = useCallback(() => {
+    setFormMode("create")
+    setEditingProduct(null)
+    setFormOpen(true)
   }, [])
 
-  const cancelEdit = useCallback(() => {
-    setEditingId(null)
-    setEditPrice("")
-    setEditStock("")
+  const openEditForm = useCallback((product: Product) => {
+    setFormMode("edit")
+    setEditingProduct(product)
+    setFormOpen(true)
   }, [])
 
-  const saveEdit = useCallback(
-    async (id: number) => {
+  const handleSaveProduct = useCallback(
+    async (input: ProductInput) => {
+      const token = getToken()
+      if (!token) {
+        handleUnauthorized()
+        return
+      }
+
       setIsSaving(true)
-      setMessage(null)
-      try {
-        const response = await fetch(`${PRODUCTS_ENDPOINT}/${id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            price: Number(editPrice),
-            stock: Number(editStock),
-          }),
-        })
+      setActionError(null)
 
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`)
+      try {
+        if (source === "api") {
+          if (formMode === "create") {
+            await createProduct(token, input)
+          } else if (editingProduct) {
+            await updateProduct(token, editingProduct.id, input)
+          }
+          await loadProducts()
+          return
         }
 
-        setProducts((current) =>
-          current.map((product) =>
-            product.id === id
-              ? { ...product, price: Number(editPrice), stock: Number(editStock) }
-              : product,
-          ),
-        )
-        setMessage("Producto actualizado correctamente.")
-        cancelEdit()
+        if (formMode === "create") {
+          const nextId = products.reduce((max, item) => Math.max(max, item.id), 0) + 1
+          setProducts((prev) => [...prev, { id: nextId, ...input }])
+        } else if (editingProduct) {
+          setProducts((prev) =>
+            prev.map((item) => (item.id === editingProduct.id ? { ...item, ...input } : item)),
+          )
+        }
+        setLastUpdated(new Date())
       } catch (error) {
-        setMessage("No se pudo actualizar el producto. Intenta otra vez.")
+        if ((error as Error).message === "UNAUTHORIZED") {
+          handleUnauthorized()
+          return
+        }
+        throw error
       } finally {
         setIsSaving(false)
       }
     },
-    [cancelEdit, editPrice, editStock],
+    [source, formMode, editingProduct, products, loadProducts, handleUnauthorized],
   )
 
-  const deleteProduct = useCallback(async (id: number) => {
-    setIsSaving(true)
-    setMessage(null)
-    try {
-      const response = await fetch(`${PRODUCTS_ENDPOINT}/${id}`, {
-        method: "DELETE",
-      })
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
-      }
-      setProducts((current) => current.filter((product) => product.id !== id))
-      setMessage("Producto eliminado correctamente.")
-      if (editingId === id) {
-        cancelEdit()
-      }
-    } catch (error) {
-      setMessage("No se pudo eliminar el producto. Intenta otra vez.")
-    } finally {
-      setIsSaving(false)
-    }
-  }, [cancelEdit, editingId])
+  const handleDeleteProduct = useCallback(
+    async (product: Product) => {
+      const confirmed = window.confirm(`¿Eliminar "${product.name}" del inventario?`)
+      if (!confirmed) return
 
-  const addProduct = useCallback(async () => {
-    setIsSaving(true)
-    setMessage(null)
-    try {
-      const response = await fetch(PRODUCTS_ENDPOINT, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: newName.trim(),
-          price: Number(newPrice),
-          stock: Number(newStock),
-        }),
-      })
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
+      const token = getToken()
+      if (!token) {
+        handleUnauthorized()
+        return
       }
-      const created = (await response.json()) as Product
-      setProducts((current) => [...current, created])
-      setMessage("Producto creado correctamente.")
-      setNewName("")
-      setNewPrice("0")
-      setNewStock("0")
-    } catch (error) {
-      setMessage("No se pudo crear el producto. Revisa los valores e intenta otra vez.")
-    } finally {
-      setIsSaving(false)
-    }
-  }, [newName, newPrice, newStock])
+
+      setActionError(null)
+
+      try {
+        if (source === "api") {
+          await deleteProduct(token, product.id)
+          await loadProducts()
+          return
+        }
+
+        setProducts((prev) => prev.filter((item) => item.id !== product.id))
+        setLastUpdated(new Date())
+      } catch (error) {
+        if ((error as Error).message === "UNAUTHORIZED") {
+          handleUnauthorized()
+          return
+        }
+        setActionError((error as Error).message || "No se pudo eliminar el producto.")
+      }
+    },
+    [source, loadProducts, handleUnauthorized],
+  )
 
   const { totalProducts, totalValue, lowStockCount } = useMemo(() => {
     return {
@@ -170,28 +179,37 @@ export function Dashboard() {
   return (
     <main className="min-h-screen bg-background">
       <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:py-12">
-        {/* Header */}
         <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3">
             <div className="flex size-11 items-center justify-center rounded-xl bg-primary text-primary-foreground">
               <Boxes className="size-6" aria-hidden="true" />
             </div>
             <div>
-              <h1 className="text-pretty text-2xl font-semibold tracking-tight text-foreground">SmartInventory</h1>
-              <p className="text-sm text-muted-foreground">Panel de administración de inventario</p>
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-pretty text-2xl font-semibold tracking-tight text-foreground">SmartInventory</h1>
+                {role ? <RoleBadge role={role} /> : null}
+              </div>
+              <p className="text-sm text-muted-foreground">
+                {isAdmin
+                  ? "Panel de administración: gestioná el inventario completo"
+                  : "Consulta de inventario (solo lectura)"}
+              </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <ConnectionBadge source={source} />
-            <Button onClick={loadProducts} disabled={isRefreshing || isSaving} className="gap-2">
+            <Button onClick={loadProducts} disabled={isRefreshing} className="gap-2">
               <RefreshCw className={`size-4 ${isRefreshing ? "animate-spin" : ""}`} aria-hidden="true" />
               {isRefreshing ? "Actualizando..." : "Refrescar"}
+            </Button>
+            <Button onClick={handleLogout} variant="outline" className="gap-2 bg-transparent">
+              <LogOut className="size-4" aria-hidden="true" />
+              <span className="sr-only sm:not-sr-only">Salir</span>
             </Button>
           </div>
         </header>
 
-        {/* KPIs */}
         <section aria-label="Indicadores clave" className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <KpiCard
             label="Productos distintos"
@@ -214,72 +232,69 @@ export function Dashboard() {
           />
         </section>
 
-        {/* Crear producto */}
-        <section aria-label="Agregar producto" className="mt-8 rounded-xl border border-border/60 bg-card p-4">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-            <div className="grid gap-3 sm:grid-cols-3 sm:items-end">
-              <label className="block text-sm text-muted-foreground">
-                Nombre
-                <input
-                  value={newName}
-                  onChange={(event) => setNewName(event.target.value)}
-                  className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
-                  placeholder="Ej. Notebook"
-                />
-              </label>
-              <label className="block text-sm text-muted-foreground">
-                Precio
-                <input
-                  type="number"
-                  step="0.01"
-                  value={newPrice}
-                  onChange={(event) => setNewPrice(event.target.value)}
-                  className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
-                />
-              </label>
-              <label className="block text-sm text-muted-foreground">
-                Stock
-                <input
-                  type="number"
-                  value={newStock}
-                  onChange={(event) => setNewStock(event.target.value)}
-                  className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary focus:ring-2 focus:ring-primary/20"
-                />
-              </label>
-            </div>
-            <Button onClick={addProduct} disabled={isSaving} className="w-full sm:w-auto">
-              Agregar producto
-            </Button>
-          </div>
-          {message ? <p className="mt-3 text-sm text-muted-foreground">{message}</p> : null}
-        </section>
-
-        {/* Tabla */}
         <section aria-label="Listado de productos" className="mt-8">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-foreground">Productos</h2>
-            {lastUpdated ? (
-              <p className="text-xs text-muted-foreground">
-                Actualizado: {lastUpdated.toLocaleTimeString("es-AR")}
-              </p>
+          <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-foreground">Productos</h2>
+              {lastUpdated ? (
+                <p className="text-xs text-muted-foreground">
+                  Actualizado: {lastUpdated.toLocaleTimeString("es-AR")}
+                </p>
+              ) : null}
+            </div>
+            {isAdmin ? (
+              <Button onClick={openCreateForm} className="gap-2 self-start sm:self-auto">
+                <Plus className="size-4" aria-hidden="true" />
+                Nuevo producto
+              </Button>
             ) : null}
           </div>
+
+          {actionError ? (
+            <div
+              role="alert"
+              className="mb-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+            >
+              {actionError}
+            </div>
+          ) : null}
+
           <ProductsTable
             products={products}
-            editingId={editingId}
-            editPrice={editPrice}
-            editStock={editStock}
-            onEdit={startEdit}
-            onPriceChange={setEditPrice}
-            onStockChange={setEditStock}
-            onSave={saveEdit}
-            onCancel={cancelEdit}
-            onDelete={deleteProduct}
-            saving={isSaving}
+            canManage={isAdmin}
+            onEdit={openEditForm}
+            onDelete={handleDeleteProduct}
           />
         </section>
       </div>
+
+      {isAdmin ? (
+        <ProductFormDialog
+          open={formOpen}
+          mode={formMode}
+          product={editingProduct}
+          isSubmitting={isSaving}
+          onClose={() => setFormOpen(false)}
+          onSubmit={handleSaveProduct}
+        />
+      ) : null}
     </main>
+  )
+}
+
+function RoleBadge({ role }: { role: UserRole }) {
+  if (role === "admin") {
+    return (
+      <Badge variant="secondary" className="border border-primary/30 bg-primary/15 text-primary">
+        Administrador
+      </Badge>
+    )
+  }
+
+  return (
+    <Badge variant="secondary" className="border border-border bg-muted text-muted-foreground">
+      Vendedor
+    </Badge>
   )
 }
 
